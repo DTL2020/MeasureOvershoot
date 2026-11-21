@@ -15,7 +15,7 @@ Output is text overlay with Subtitle over input frame. Also sets frame propertie
 Example script:
 LoadPlugin("MeasureOvershoot.dll")
 BlankClip(length=240, width=200, height=50, pixel_type="YV12")
-Subtitle("TEXT", size=48, text_color=$AFAFAF, noaa=true).PointResize(width*100, height*100)
+Subtitle("TEXT", size=48, text_color=$AFAFAF, noaa=true).PointResize(width**100, height**100)
 UserDefined2Resize(width/20, height/20, b=80, c=-20, s=5)
 MeasureOvershoot(N=8, th=0.3)
 
