@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <numeric>
+#include <cmath>
 
 class MeasureOvershoot : public GenericVideoFilter {
 private:
@@ -14,6 +16,22 @@ private:
 
     // Overshoots measurement function for 1D profile 
     void AnalyzeLine(const float* line, int length, int step, std::vector<double>& overshoots) {
+        // helper lambda 
+        auto get_shelf = [&](int idx_from, int idx_to, double& mean_val) -> bool {
+            if (idx_from < 0 || idx_to >= length || idx_from > idx_to) return false;
+            float min_v = line[idx_from], max_v = line[idx_from];
+            double sum = 0.0;
+            int count = idx_to - idx_from + 1;
+            for (int j = idx_from; j <= idx_to; ++j) {
+                float v = line[j];
+                if (v < min_v) min_v = v;
+                if (v > max_v) max_v = v;
+                sum += v;
+            }
+            mean_val = sum / count;
+            return (max_v - min_v) < (edge_threshold * 0.15);
+        };
+
         // Search for contigous parts of transients (rise or fall) 
         int i = step;
         while (i < length - step) {
@@ -40,48 +58,38 @@ private:
 
             float v_start = line[start];
             float v_end = line[end];
-            double edge_amp = std::abs(v_end - v_start);
+            double raw_amp = std::abs(line[end] - line[start]);
+            if (raw_amp >= edge_threshold) {
+                int shelf_offset = 3 * N;
+                int shelf_len = 2 * N;
 
-            // Filter out small noise and textures 
-            if (edge_amp >= edge_threshold) {
-                // Search window - about 1.5..2 source samples (before upsampling to N)
-                int search_radius = 2 * N;
+                double v_shelf_start = 0.0, v_shelf_end = 0.0;
+                bool left_flat = get_shelf(start - shelf_offset - shelf_len, start - shelf_offset, v_shelf_start);
+                bool right_flat = get_shelf(end + shelf_offset, end + shelf_offset + shelf_len, v_shelf_end);
 
-                // 1. Post-overshoot (after transient ends)
-                float max_post = v_end;
-                int post_limit = std::min(length - 1, end + search_radius);
-                for (int k = end + 1; k <= post_limit; ++k) {
-                    if (dir > 0) {
-                        if (line[k] > max_post) max_post = line[k];
+                if (left_flat && right_flat) {
+                    double edge_amp = std::abs(v_shelf_end - v_shelf_start);
+                    if (edge_amp >= edge_threshold) {
+                        int search_radius = 10 * N;
+
+                    double max_post = v_shelf_end;
+                    int post_limit = std::min(length - 1, end + search_radius);
+                    for (int k = end; k <= post_limit; ++k) {
+                        if ((dir > 0 && line[k] > max_post) || (dir <= 0 && line[k] < max_post)) max_post = line[k];
                     }
-                    else {
-                        if (line[k] < max_post) max_post = line[k];
-                    }
-                }
-                double post_over = std::abs(max_post - v_end);
+                    double post_over = std::abs(max_post - v_shelf_end);
 
-                // 2. Pre overshoot (before transient start)
-                float max_pre = v_start;
-                int pre_limit = std::max(0, start - search_radius);
-                for (int k = start - 1; k >= pre_limit; --k) {
-                    if (dir > 0) {
-                        if (line[k] < max_pre) max_pre = line[k];
+                    double max_pre = v_shelf_start;
+                    int pre_limit = std::max(0, start - search_radius);
+                    for (int k = start; k >= pre_limit; --k) {
+                        if ((dir > 0 && line[k] < max_pre) || (dir <= 0 && line[k] > max_pre)) max_pre = line[k];
                     }
-                    else {
-                        if (line[k] > max_pre) max_pre = line[k];
+                    double pre_over = std::abs(max_pre - v_shelf_start);
+                    double rel_pct = (std::max(post_over, pre_over) / edge_amp) * 100.0;
+                    if (rel_pct > 0.0 && rel_pct < 100.0) overshoots.push_back(rel_pct);
                     }
-                }
-                double pre_over = std::abs(max_pre - v_start);
-
-                double worst_over = std::max(post_over, pre_over);
-                double rel_overshoot_pct = (worst_over / edge_amp) * 100.0;
-
-                // Skip artifacts 
-                if (rel_overshoot_pct > 0.0 && rel_overshoot_pct < 100.0) {
-                    overshoots.push_back(rel_overshoot_pct);
                 }
             }
-
             i = end + step;
         }
     }
