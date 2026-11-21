@@ -11,6 +11,7 @@
 class MeasureOvershoot : public GenericVideoFilter {
 private:
     int N;
+    int scale;
     double edge_threshold; // Minimum Y transient relative amplitude to be treated as transient 
     PClip upscaled_clip;
 
@@ -60,8 +61,8 @@ private:
             float v_end = line[end];
             double raw_amp = std::abs(line[end] - line[start]);
             if (raw_amp >= edge_threshold) {
-                int shelf_offset = 3 * N;
-                int shelf_len = 2 * N;
+                int shelf_offset = 3 * scale;
+                int shelf_len = 2 * scale;
 
                 double v_shelf_start = 0.0, v_shelf_end = 0.0;
                 bool left_flat = get_shelf(start - shelf_offset - shelf_len, start - shelf_offset, v_shelf_start);
@@ -70,11 +71,13 @@ private:
                 if (left_flat && right_flat) {
                     double edge_amp = std::abs(v_shelf_end - v_shelf_start);
                     if (edge_amp >= edge_threshold) {
-                        int search_radius = 10 * N;
+                        int search_radius = 3 * scale;
 
                     double max_post = v_shelf_end;
                     int post_limit = std::min(length - 1, end + search_radius);
                     for (int k = end; k <= post_limit; ++k) {
+                        if ((dir > 0 && line[k] < v_shelf_end - edge_amp * 0.25) ||
+                            (dir <= 0 && line[k] > v_shelf_end + edge_amp * 0.25)) break;
                         if ((dir > 0 && line[k] > max_post) || (dir <= 0 && line[k] < max_post)) max_post = line[k];
                     }
                     double post_over = std::abs(max_post - v_shelf_end);
@@ -82,6 +85,8 @@ private:
                     double max_pre = v_shelf_start;
                     int pre_limit = std::max(0, start - search_radius);
                     for (int k = start; k >= pre_limit; --k) {
+                        if ((dir > 0 && line[k] > v_shelf_start + edge_amp * 0.25) ||
+                            (dir <= 0 && line[k] < v_shelf_start - edge_amp * 0.25)) break;
                         if ((dir > 0 && line[k] < max_pre) || (dir <= 0 && line[k] > max_pre)) max_pre = line[k];
                     }
                     double pre_over = std::abs(max_pre - v_shelf_start);
@@ -96,11 +101,12 @@ private:
 
 public:
     MeasureOvershoot(PClip _child, int _N, double _threshold, IScriptEnvironment* env)
-        : GenericVideoFilter(_child), N(_N), edge_threshold(_threshold) {
+        : GenericVideoFilter(_child), N(_N), scale((_N == 0) ? 1 : _N), edge_threshold(_threshold) {
 
-        if (N < 2 || N > 8) {
-            env->ThrowError("MeasureOvershoot: N must be between 2 and 8.");
+        if (N != 0 && (N < 2 || N > 20)) {
+            env->ThrowError("MeasureOvershoot: N must be 0 (no resize) or between 2 and 20.");
         }
+
         if (!vi.IsPlanar() && !vi.IsY()) {
             env->ThrowError("MeasureOvershoot: Only Planar YUV or Y formats are supported.");
         }
@@ -113,13 +119,18 @@ public:
         const char* bit_names[2] = { nullptr, nullptr };
         y_float = env->Invoke("ConvertBits", AVSValue(bit_args, 2), bit_names).AsClip();
 
-        // Call SincResize(width * N, height * N, taps=10)
-        int up_w = vi.width * N;
-        int up_h = vi.height * N;
+        if (N != 0)
+        {
+            // Call SincResize(width * N, height * N, taps=10)
+            int up_w = vi.width * N;
+            int up_h = vi.height * N;
 
-        AVSValue resize_args[4] = { y_float, up_w, up_h, 10 };
-        const char* resize_names[4] = { nullptr, nullptr, nullptr, "taps" };
-        upscaled_clip = env->Invoke("SincResize", AVSValue(resize_args, 4), resize_names).AsClip();
+            AVSValue resize_args[4] = { y_float, up_w, up_h, 16 };
+            const char* resize_names[4] = { nullptr, nullptr, nullptr, "taps" };
+            upscaled_clip = env->Invoke("SincLin2Resize", AVSValue(resize_args, 4), resize_names).AsClip();
+        }
+        else
+            upscaled_clip = y_float;
     }
 
     PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env) override {
@@ -134,13 +145,13 @@ public:
         overshoots.reserve((width + height) * 2);
 
         // 1. Horizontal analisys with step of N
-        for (int y = N; y < height - N; y += N) {
+        for (int y = scale; y < height - scale; y += scale) {
             AnalyzeLine(srcp + y * pitch, width, 1, overshoots);
         }
 
         // 2. Vertical analisys 
         std::vector<float> col_buf(height);
-        for (int x = N; x < width - N; x += N) {
+        for (int x = scale; x < width - scale; x += scale) {
             for (int y = 0; y < height; ++y) {
                 col_buf[y] = srcp[y * pitch + x];
             }
