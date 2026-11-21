@@ -1,5 +1,5 @@
 # MeasureOvershoot
-AVS filter to measure overshoot amplitude. Debug and filter/script setup/tune supplementary filter.
+AVS filter to measure overshoot amplitude. Debug and filter/script setup/tune supplementary filter. Only YUV (or Y only) input supported (of 8-32 bits). Y plane only used. Internal processing in foat32.
 
 Params:
 
