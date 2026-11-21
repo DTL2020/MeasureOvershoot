@@ -7,6 +7,6 @@ tr (float), default 0.25, valid range 0.0 to 1.0  - minimum transient amplitude 
 Usage:
 MeasureOvershoot(N=8, tr=0.3)
 
-Output is text overlay with Subtitle over input frame.
+Output is text overlay with Subtitle over input frame. Also sets frame properties:"ovsh_P95", "ovsh_P99", "ovsh_Max","ovsh_Edges".
 
 Designed mostly by Google AI.
